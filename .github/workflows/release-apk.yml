@@ -1,0 +1,68 @@
+name: Release APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.0.1-offline-custom-api)'
+        required: true
+        type: string
+      release_title:
+        description: 'Release title'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.44.9'
+
+      - name: Upgrade font_awesome for Flutter 3.44+
+        run: flutter pub add font_awesome_flutter:^11.0.0
+
+      - run: flutter pub get
+      - run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Build debug APK (arm64)
+        run: |
+          flutter build apk --debug \
+            --target-platform android-arm64 \
+            --dart-define=API_KEY=${{ secrets.MESHMAPPER_API_KEY }}
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          TITLE="${{ github.event.inputs.release_title }}"
+          gh release create "$TAG" \
+            build/app/outputs/flutter-apk/app-debug.apk#meshmapper-offline-bridge.apk \
+            --repo "${{ github.repository }}" \
+            --title "$TITLE" \
+            --notes-file - <<'EOF'
+          ## Changes
+
+          - Synced with upstream **dev** after merge of [PR #28](https://github.com/MeshMapper/MeshMapper_Flutter_App/pull/28)
+          - Forward offline wardrive batches to Custom API after upload (incl. review follow-ups: host-only logging, quiet disabled path, iata semantics note)
+
+          ## APK
+
+          Debug **arm64** build. MeshMapper wardrive API key injected at build time via repository secret `MESHMAPPER_API_KEY`.
+
+          **Install:** `meshmapper-offline-bridge.apk`
+
+          Custom API endpoint: Settings or `meshmapper://` import link.
+
+          Upstream PR: https://github.com/MeshMapper/MeshMapper_Flutter_App/pull/28
+          EOF
